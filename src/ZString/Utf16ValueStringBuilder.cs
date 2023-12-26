@@ -11,6 +11,7 @@ namespace Cysharp.Text
 
         const int ThreadStaticBufferSize = 31111;
         const int DefaultBufferSize = 32768; // use 32K default buffer.
+        const float GrowFactor = 2;
 
         static char newLine1;
         static char newLine2;
@@ -74,11 +75,7 @@ namespace Cysharp.Text
             char[]? buf;
             if (disposeImmediately)
             {
-                buf = scratchBuffer;
-                if (buf == null)
-                {
-                    buf = scratchBuffer = new char[ThreadStaticBufferSize];
-                }
+                buf = scratchBuffer ??= new char[ThreadStaticBufferSize];
                 scratchBufferUsed = true;
             }
             else
@@ -119,7 +116,6 @@ namespace Cysharp.Text
 
         public void TryGrow(int sizeHint)
         {
-
             if (buffer!.Length < index + sizeHint)
             {
                 Grow(sizeHint);
@@ -128,7 +124,7 @@ namespace Cysharp.Text
 
         public void Grow(int sizeHint)
         {
-            var nextSize = buffer!.Length * 2;
+            var nextSize = (int)(buffer!.Length * GrowFactor);
             if (sizeHint != 0)
             {
                 nextSize = Math.Max(nextSize, index + sizeHint);
@@ -212,7 +208,7 @@ namespace Cysharp.Text
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Append(string value, int startIndex, int count)
+        public void Append(string? value, int startIndex, int count)
         {
             if (value == null)
             {
@@ -237,7 +233,7 @@ namespace Cysharp.Text
                 Grow(charCount);
             }
             Array.Copy(value, startIndex, buffer, index, charCount);
-            index += charCount;
+            Advance(charCount);
         }
 
         /// <summary>Appends a contiguous region of arbitrary memory to this instance.</summary>
@@ -250,7 +246,7 @@ namespace Cysharp.Text
             }
 
             value.CopyTo(buffer.AsSpan(index));
-            index += value.Length;
+            Advance(value.Length);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -271,7 +267,7 @@ namespace Cysharp.Text
                     ThrowArgumentException(nameof(value));
                 }
             }
-            index += written;
+            Advance(written);
         }
 
         /// <summary>Appends the string representation of a specified value followed by the default line terminator to the end of this instance.</summary>
@@ -312,7 +308,7 @@ namespace Cysharp.Text
                 ExceptionUtil.ThrowArgumentOutOfRangeException(nameof(count));
             }
 
-            int currentLength = Length;
+            var currentLength = Length;
             if ((uint)index > (uint)currentLength)
             {
                 ExceptionUtil.ThrowArgumentOutOfRangeException(nameof(index));
@@ -327,16 +323,16 @@ namespace Cysharp.Text
             var newBuffer = ArrayPool<char>.Shared.Rent(Math.Max(DefaultBufferSize, newSize));
 
             buffer.AsSpan(0, index).CopyTo(newBuffer);
-            int newBufferIndex = index;
+            var newBufferIndex = index;
 
-            for (int i = 0; i < count; i++)
+            for (var i = 0; i < count; i++)
             {
                 value.CopyTo(newBuffer.AsSpan(newBufferIndex));
                 newBufferIndex += value.Length;
             }
 
-            int remainLnegth = this.index - index;
-            buffer.AsSpan(index, remainLnegth).CopyTo(newBuffer.AsSpan(newBufferIndex));
+            var remainLength = this.index - index;
+            buffer.AsSpan(index, remainLength).CopyTo(newBuffer.AsSpan(newBufferIndex));
 
             if (buffer!.Length != ThreadStaticBufferSize)
             {
@@ -347,7 +343,7 @@ namespace Cysharp.Text
             }
 
             buffer = newBuffer;
-            this.index = newBufferIndex + remainLnegth;
+            this.index = newBufferIndex + remainLength;
         }
 
         /// <summary>
@@ -596,11 +592,13 @@ namespace Cysharp.Text
         }
 
         /// <summary>IBufferWriter.Advance.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Advance(int count)
         {
             index += count;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         void IResettableBufferWriter<char>.Reset()
         {
             index = 0;
